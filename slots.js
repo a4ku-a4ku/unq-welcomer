@@ -207,6 +207,11 @@ async function doUnlock(id, password, card, btn) {
       return showToast(data.error || 'Invalid slot password.');
     }
 
+    if (data.token) {
+      localStorage.setItem('unq_slot_session', data.token);
+      localStorage.setItem('unq_slot_id', String(id));
+    }
+
     showToast(`Node ${String(id).padStart(2, '0')} unlocked! Opening dashboard...`);
     setTimeout(() => {
       window.location.href = `/dashboard.html?slot=${id}`;
@@ -231,8 +236,11 @@ async function load() {
     showToast(`🔒 Node ${String(sId).padStart(2, '0')} is not assigned yet.`);
   }
 
+  const savedToken = localStorage.getItem('unq_slot_session');
+  const headers = savedToken ? { 'X-Slot-Token': savedToken } : {};
+
   try {
-    const response = await fetch('/api/slots');
+    const response = await fetch('/api/slots', { headers, credentials: 'same-origin' });
     if (!response.ok) throw new Error('Failed');
     const data = await response.json();
     render(data.slots || []);
@@ -241,17 +249,18 @@ async function load() {
   }
 
   try {
-    const meRes = await fetch('/api/me');
+    const meRes = await fetch('/api/me', { headers, credentials: 'same-origin' });
     if (meRes.ok) {
       const me = await meRes.json();
       const banner = document.querySelector('#active-session-banner');
       if (banner && me.username) {
         banner.style.display = 'flex';
+        const targetSlot = me.slotId || (me.subscriptions && me.subscriptions[0] ? me.subscriptions[0].replace('node:', '') : '1');
         banner.innerHTML = `<div>
           <span class="eyebrow" style="margin-bottom:2px;">AUTHENTICATED SESSION</span>
           <strong>Active Container: ${escapeHtml(me.username.toUpperCase().replace('_', ' '))}</strong>
         </div>
-        <a href="/dashboard.html" class="resume-dash-btn">RESUME DASHBOARD →</a>`;
+        <a href="/dashboard.html?slot=${targetSlot}" class="resume-dash-btn">RESUME DASHBOARD →</a>`;
       }
     }
   } catch (e) {}

@@ -10,7 +10,8 @@ const port = Number(process.env.PORT) || 3000;
 const configFile = path.join(root, 'user-configs.json');
 const slotFile = path.join(root, 'slot-data.json');
 const adminConfigFile = path.join(root, 'admin-config.json');
-const sessions = new Map();
+const sessionFile = path.join(root, 'sessions.json');
+let sessions = new Map();
 const adminSessions = new Map();
 const loginAttempts = new Map();
 const ADMIN_SESSION_TTL = 1000 * 60 * 60 * 2;
@@ -108,6 +109,28 @@ function writeJson(file, value) {
   }
 }
 
+function loadSessions() {
+  const data = readJson(sessionFile, {});
+  const map = new Map();
+  const now = Date.now();
+  for (const [token, sess] of Object.entries(data)) {
+    if (sess && sess.createdAt && (now - sess.createdAt < 1000 * 60 * 60 * 24 * 7)) {
+      map.set(token, sess);
+    }
+  }
+  return map;
+}
+
+function saveSessions() {
+  const obj = {};
+  for (const [token, sess] of sessions.entries()) {
+    obj[token] = sess;
+  }
+  writeJson(sessionFile, obj);
+}
+
+sessions = loadSessions();
+
 function hashSecret(secret, salt = crypto.randomBytes(16).toString('hex')) {
   return `${salt}:${crypto.createHash('sha256').update(`${salt}:${secret}`).digest('hex')}`;
 }
@@ -191,8 +214,9 @@ function session(request) {
     if (s.slotId) {
       const slots = slotState();
       const slot = slots.find(item => item.id === s.slotId);
-      if (!slot || !slot.passwordHash || (slot.expiresAt && Date.now() > slot.expiresAt)) {
+      if (!slot || (slot.expiresAt && Date.now() > slot.expiresAt)) {
         sessions.delete(userToken);
+        saveSessions();
         return null;
       }
     }
@@ -226,7 +250,32 @@ function session(request) {
   return null;
 }
 function requireSession(request, response) { const current = session(request); if (!current) { send(response, 401, { error: 'Sign in required.' }); return null; } return current; }
-function slotState() { const data = readJson(slotFile, { slots: [] }); return Array.from({ length: 12 }, (_, i) => data.slots[i] || { id: i + 1, status: 'offline', passwordHash: null, unlockedAt: null, lastUsedAt: null }); }
+function slotState() {
+  const data = readJson(slotFile, { slots: [] });
+  const slots = Array.from({ length: 12 }, (_, i) => data.slots[i] || {
+    id: i + 1,
+    status: 'offline',
+    passwordHash: null,
+    unlockedAt: null,
+    lastUsedAt: null,
+    customerNote: null,
+    plan: null,
+    expiresAt: null
+  });
+
+  // Ensure Slot 1 always has an initial active key initialized so it is never locked/unassigned out of the box
+  if (!slots[0].passwordHash) {
+    const defaultKey = 'KEY-S01-UNQ-2026';
+    slots[0].passwordHash = hashSecret(defaultKey, 'unq-s01-master');
+    slots[0].activeKey = defaultKey;
+    slots[0].plan = 'Lifetime';
+    slots[0].customerNote = 'Master Container Node 01';
+    slots[0].createdAt = Date.now();
+    writeSlots(slots);
+  }
+
+  return slots;
+}
 function writeSlots(slots) { writeJson(slotFile, { slots }); }
 function publicSlot(slot, currentSession = null) {
   const isExpired = Boolean(slot.expiresAt && Date.now() > slot.expiresAt);
@@ -325,6 +374,7 @@ function enforceSlotExpirations() {
           sessions.delete(token);
         }
       }
+      saveSessions();
       if (slot.status !== 'expired') {
         slot.status = 'expired';
         changed = true;
@@ -379,6 +429,9 @@ function getBotStatus(username) {
   };
 }
 
+const botTransitioning = new Map();
+const lastStoppedAt = new Map();
+
 function stopBot(username) {
   const pending = botTimers.get(username);
   if (pending) {
@@ -387,114 +440,175 @@ function stopBot(username) {
   }
   const instances = botInstances.get(username) || [];
   instances.forEach(inst => {
-    try { if (inst.client && inst.client.destroy) inst.client.destroy(); } catch (e) {}
+    try {
+      if (inst.client) {
+        inst.client.removeAllListeners();
+        if (typeof inst.client.destroy === 'function') {
+          inst.client.destroy();
+        }
+      }
+    } catch (e) {}
   });
   botInstances.delete(username);
+  lastStoppedAt.set(username, Date.now());
   pushLog(username, 'info', 'All bot instances stopped.');
 }
 
-function startBot(username) {
-  const configs = readJson(configFile, {});
-  const cfg = { ...defaultConfig, ...(configs[username] || (username === 'slot_01' ? configs['AAKU'] : null) || {}) };
-  const tokens = (cfg.tokens || []).filter(t => typeof t === 'string' && t.trim().length > 0).slice(0, 1);
-  const routes = (cfg.routes || []).filter(r => r && r.serverId && r.channelId);
-  const messages = (cfg.messages || []).filter(m => typeof m === 'string' && m.trim().length > 0);
-  const minDelay = Math.max(1, Number(cfg.minDelay) || 2);
-  const maxDelay = Math.max(minDelay, Number(cfg.maxDelay) || 5);
-
-  stopBot(username);
-
-  if (!DiscordClient) {
-    pushLog(username, 'error', 'discord.js-selfbot-v13 not installed. Run: npm install discord.js-selfbot-v13');
-    return { ok: false, error: 'Dependency missing' };
+async function startBot(username) {
+  if (botTransitioning.get(username)) {
+    return { ok: false, error: 'Bot engine is currently busy starting or stopping. Please wait a moment.' };
   }
-  if (tokens.length === 0) {
-    pushLog(username, 'error', 'No tokens configured. Add at least one Discord token.');
-    return { ok: false, error: 'No tokens' };
-  }
-  if (routes.length === 0) {
-    pushLog(username, 'error', 'No routes configured. Add at least one server/channel pair.');
-    return { ok: false, error: 'No routes' };
-  }
-  if (messages.length === 0) {
-    pushLog(username, 'error', 'No welcome messages configured.');
-    return { ok: false, error: 'No messages' };
-  }
+  botTransitioning.set(username, true);
 
-  const instances = [];
-  tokens.forEach((rawToken, idx) => {
-    const token = rawToken.trim();
-    try {
-      const client = new DiscordClient({ checkUpdate: false });
-      const inst = { client, tag: null, online: false, tokenIdx: idx, startedAt: Date.now() };
-      instances.push(inst);
+  try {
+    const configs = readJson(configFile, {});
+    const cfg = { ...defaultConfig, ...(configs[username] || (username === 'slot_01' ? configs['AAKU'] : null) || {}) };
+    const tokens = (cfg.tokens || []).filter(t => typeof t === 'string' && t.trim().length > 0).slice(0, 1);
+    const routes = (cfg.routes || []).filter(r => r && r.serverId && r.channelId);
+    const messages = (cfg.messages || []).filter(m => typeof m === 'string' && m.trim().length > 0);
+    const minDelay = Math.max(1, Number(cfg.minDelay) || 2);
+    const maxDelay = Math.max(minDelay, Number(cfg.maxDelay) || 5);
 
-      client.on('ready', () => {
-        inst.tag = client.user ? client.user.tag : `Token #${idx + 1}`;
-        inst.online = true;
-        pushLog(username, 'success', `✅ Account Online: ${inst.tag} (${client.user ? client.user.id : ''})`);
-      });
+    stopBot(username);
 
-      client.on('error', (err) => {
-        pushLog(username, 'error', `⚠️ Discord Gateway: ${err.message || 'Connection glitch'}`);
-      });
-
-      client.on('guildMemberAdd', async (member) => {
-        const serverID = member.guild.id;
-        const route = routes.find(r => String(r.serverId) === String(serverID));
-        if (!route) return;
-
-        pushLog(username, 'info', `📢 Join detected in [${member.guild.name}]: ${member.user.tag || member.user.username}`);
-
-        const channel = await client.channels.fetch(String(route.channelId)).catch(() => null);
-        if (!channel) { pushLog(username, 'error', `Channel [${route.channelId}] not found in ${member.guild.name}`); return; }
-
-        const delaySec = Math.random() * (maxDelay - minDelay) + minDelay;
-        const delayMs = Math.floor(delaySec * 1000);
-
-        if (!botTimers.has(username)) botTimers.set(username, new Set());
-        const userTimers = botTimers.get(username);
-
-        const timer = setTimeout(async () => {
-          userTimers.delete(timer);
-          const randomMsg = messages[Math.floor(Math.random() * messages.length)];
-          const memberCount = member.guild.memberCount || '?';
-          let finalMsg = randomMsg
-            .replace(/\{tag\}/g, `<@${member.id}>`)
-            .replace(/\{user\}/g, `<@${member.id}>`)
-            .replace(/\{mention\}/g, `<@${member.id}>`)
-            .replace(/\{username\}/g, member.user.username)
-            .replace(/\{server\}/g, member.guild.name)
-            .replace(/\{guild\}/g, member.guild.name)
-            .replace(/\{count\}/g, String(memberCount));
-
-          if (!finalMsg.includes(`<@${member.id}>`)) {
-            finalMsg = `${finalMsg} <@${member.id}>`;
-          }
-
-          try {
-            await channel.send(finalMsg);
-            pushLog(username, 'success', `🚀 Welcomed ${member.user.username} in #${channel.name || 'channel'} (${member.guild.name}) [Delay: ${delaySec.toFixed(1)}s]`);
-          } catch (err) {
-            pushLog(username, 'error', `❌ Send Fail in ${member.guild.name}: ${err.message}`);
-          }
-        }, delayMs);
-        userTimers.add(timer);
-      });
-
-      const safePrefix = token.length > 8 ? `${token.slice(0, 4)}...****` : '****';
-      client.login(token).catch((err) => {
-        pushLog(username, 'error', `❌ Login Fail (Token #${idx + 1} ${safePrefix}): ${err.message || 'Unauthorized / expired'}`);
-      });
-    } catch (err) {
-      pushLog(username, 'error', `❌ Client init fail: ${err.message}`);
+    if (!DiscordClient) {
+      pushLog(username, 'error', 'discord.js-selfbot-v13 not installed. Run: npm install discord.js-selfbot-v13');
+      return { ok: false, error: 'Dependency missing' };
     }
-  });
+    if (tokens.length === 0) {
+      pushLog(username, 'error', 'No tokens configured. Add at least one Discord token in Setup.');
+      return { ok: false, error: 'No tokens configured' };
+    }
+    if (routes.length === 0) {
+      pushLog(username, 'error', 'No routes configured. Add at least one server/channel pair.');
+      return { ok: false, error: 'No routes configured' };
+    }
+    if (messages.length === 0) {
+      pushLog(username, 'error', 'No welcome messages configured. Add at least one message.');
+      return { ok: false, error: 'No messages configured' };
+    }
 
-  botInstances.set(username, instances);
-  pushLog(username, 'info', `Starting ${instances.length} bot connection(s)...`);
-  return { ok: true };
+    // Discord Gateway Cooldown Protection:
+    // Discord Gateway enforces rate limits on identifies. If stopped recently, wait 2.5s to let socket cleanly close.
+    const timeSinceStop = Date.now() - (lastStoppedAt.get(username) || 0);
+    if (timeSinceStop < 2500) {
+      const waitMs = 2500 - timeSinceStop;
+      pushLog(username, 'info', `⏳ Gateway Cooldown: waiting ${(waitMs / 1000).toFixed(1)}s for previous connection to terminate...`);
+      await new Promise(r => setTimeout(r, waitMs));
+    }
+
+    const instances = [];
+    tokens.forEach((rawToken, idx) => {
+      const token = rawToken.trim();
+      try {
+        const client = new DiscordClient({ checkUpdate: false });
+        const inst = { client, tag: null, online: false, tokenIdx: idx, startedAt: Date.now() };
+        instances.push(inst);
+
+        client.on('ready', () => {
+          inst.tag = client.user ? (client.user.tag || `@${client.user.username}`) : `Token #${idx + 1}`;
+          inst.online = true;
+          pushLog(username, 'success', `✅ Account Online: ${inst.tag} (${client.user ? client.user.id : ''})`);
+        });
+
+        client.on('error', (err) => {
+          pushLog(username, 'error', `⚠️ Discord Gateway: ${err.message || 'Connection glitch'}`);
+        });
+
+        client.on('shardError', (err) => {
+          pushLog(username, 'error', `⚠️ Gateway Shard Error: ${err.message || 'Network glitch'}`);
+        });
+
+        client.on('shardDisconnect', (event) => {
+          inst.online = false;
+          const code = event && event.code ? event.code : 'Unknown';
+          const reason = event && event.reason ? event.reason : 'Connection closed';
+          if (code === 4004) {
+            pushLog(username, 'error', `❌ Invalid Discord Token (Code 4004): Token has expired or password was changed.`);
+          } else {
+            pushLog(username, 'warn', `⚠️ Gateway Disconnected (${code}): ${reason}`);
+          }
+        });
+
+        client.on('rateLimit', (info) => {
+          const timeout = info && info.timeout ? (info.timeout / 1000).toFixed(1) : '?';
+          pushLog(username, 'warn', `⏳ Discord Gateway Rate Limit: Backing off for ${timeout}s`);
+        });
+
+        client.on('invalidated', () => {
+          inst.online = false;
+          pushLog(username, 'error', '❌ Discord session invalidated by Gateway. Stopping.');
+          stopBot(username);
+        });
+
+        client.on('guildMemberAdd', async (member) => {
+          const serverID = member.guild.id;
+          const route = routes.find(r => String(r.serverId) === String(serverID));
+          if (!route) return;
+
+          pushLog(username, 'info', `📢 Join detected in [${member.guild.name}]: ${member.user.tag || member.user.username}`);
+
+          const channel = await client.channels.fetch(String(route.channelId)).catch(() => null);
+          if (!channel) { pushLog(username, 'error', `Channel [${route.channelId}] not found in ${member.guild.name}`); return; }
+
+          const delaySec = Math.random() * (maxDelay - minDelay) + minDelay;
+          const delayMs = Math.floor(delaySec * 1000);
+
+          if (!botTimers.has(username)) botTimers.set(username, new Set());
+          const userTimers = botTimers.get(username);
+
+          const timer = setTimeout(async () => {
+            userTimers.delete(timer);
+            const randomMsg = messages[Math.floor(Math.random() * messages.length)];
+            const memberCount = member.guild.memberCount || '?';
+            let finalMsg = randomMsg
+              .replace(/\{tag\}/g, `<@${member.id}>`)
+              .replace(/\{user\}/g, `<@${member.id}>`)
+              .replace(/\{mention\}/g, `<@${member.id}>`)
+              .replace(/\{username\}/g, member.user.username)
+              .replace(/\{server\}/g, member.guild.name)
+              .replace(/\{guild\}/g, member.guild.name)
+              .replace(/\{count\}/g, String(memberCount));
+
+            if (!finalMsg.includes(`<@${member.id}>`)) {
+              finalMsg = `${finalMsg} <@${member.id}>`;
+            }
+
+            try {
+              await channel.send(finalMsg);
+              pushLog(username, 'success', `🚀 Welcomed ${member.user.username} in #${channel.name || 'channel'} (${member.guild.name}) [Delay: ${delaySec.toFixed(1)}s]`);
+            } catch (err) {
+              pushLog(username, 'error', `❌ Send Fail in ${member.guild.name}: ${err.message}`);
+            }
+          }, delayMs);
+          userTimers.add(timer);
+        });
+
+        const safePrefix = token.length > 8 ? `${token.slice(0, 4)}...****` : '****';
+        client.login(token).catch((err) => {
+          inst.online = false;
+          pushLog(username, 'error', `❌ Login Fail (Token #${idx + 1} ${safePrefix}): ${err.message || 'Unauthorized / expired'}`);
+          const currentInsts = botInstances.get(username) || [];
+          const remaining = currentInsts.filter(i => i !== inst);
+          if (remaining.length === 0) {
+            botInstances.delete(username);
+          } else {
+            botInstances.set(username, remaining);
+          }
+        });
+      } catch (err) {
+        pushLog(username, 'error', `❌ Client init fail: ${err.message}`);
+      }
+    });
+
+    botInstances.set(username, instances);
+    pushLog(username, 'info', `Connecting ${instances.length} bot account(s) to Discord Gateway...`);
+    return { ok: true };
+  } finally {
+    botTransitioning.delete(username);
+  }
 }
+
 
 function api(request, response, pathname) {
   if (pathname === '/api/ping' && request.method === 'GET') {
@@ -562,10 +676,11 @@ function api(request, response, pathname) {
       createdAt: Date.now()
     };
     sessions.set(sessionToken, newSession);
+    saveSessions();
 
     const sec = isRequestSecure(request) ? '; Secure' : '';
     response.writeHead(200, {
-      'Set-Cookie': `session=${sessionToken}; HttpOnly; SameSite=Lax; Path=/; Max-Age=86400${sec}`,
+      'Set-Cookie': `session=${sessionToken}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${sec}`,
       'Content-Type': 'application/json; charset=utf-8',
       'X-Content-Type-Options': 'nosniff',
       'X-Frame-Options': 'DENY',
@@ -573,7 +688,12 @@ function api(request, response, pathname) {
       'Permissions-Policy': 'geolocation=(), microphone=(), camera=()',
       'X-XSS-Protection': '1; mode=block'
     });
-    response.end(JSON.stringify({ ok: true, slot: publicSlot(slot, newSession), username: slotUsername }));
+    response.end(JSON.stringify({
+      ok: true,
+      token: sessionToken,
+      slot: publicSlot(slot, newSession),
+      username: slotUsername
+    }));
   }).catch(() => send(response, 400, { error: 'Invalid unlock request.' }));
 
   if (pathname === '/api/admin/login' && request.method === 'POST') return body(request).then((input) => {
@@ -683,6 +803,7 @@ function api(request, response, pathname) {
           sessions.delete(sToken);
         }
       }
+      saveSessions();
       stopBot(`slot_${String(id).padStart(2, '0')}`);
 
       writeSlots(slots);
@@ -715,6 +836,7 @@ function api(request, response, pathname) {
           sessions.delete(sToken);
         }
       }
+      saveSessions();
       stopBot(`slot_${String(id).padStart(2, '0')}`);
 
       writeSlots(slots);
@@ -723,8 +845,11 @@ function api(request, response, pathname) {
   }
 
   if (pathname === '/api/logout' && request.method === 'POST') {
-    const token = (request.headers.cookie || '').match(/session=([^;]+)/)?.[1];
-    if (token) sessions.delete(token);
+    const token = request.headers['x-slot-token'] || (request.headers.cookie || '').match(/session=([^;]+)/)?.[1];
+    if (token) {
+      sessions.delete(token);
+      saveSessions();
+    }
     response.writeHead(200, {
       'Set-Cookie': 'session=; Max-Age=0; Path=/',
       'Content-Type': 'application/json',
@@ -787,9 +912,13 @@ function api(request, response, pathname) {
   }
 
   if (pathname === '/api/bot/start' && request.method === 'POST') {
-    const current = requireSession(request, response); if (!current) return;
-    const result = startBot(current.username);
-    return send(response, result.ok ? 200 : 400, { ...result, status: getBotStatus(current.username) });
+    const current = requireSession(request, response); if (!current) return true;
+    startBot(current.username).then((result) => {
+      send(response, result.ok ? 200 : 400, { ...result, status: getBotStatus(current.username) });
+    }).catch((err) => {
+      send(response, 500, { ok: false, error: err.message });
+    });
+    return true;
   }
 
   if (pathname === '/api/bot/stop' && request.method === 'POST') {

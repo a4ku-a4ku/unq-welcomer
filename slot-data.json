@@ -2,15 +2,15 @@
   "slots": [
     {
       "id": 1,
-      "status": "offline",
-      "passwordHash": null,
-      "unlockedAt": null,
-      "lastUsedAt": null,
-      "customerNote": null,
-      "plan": null,
+      "status": "online",
+      "passwordHash": "unq-s01-master:8b76b5f9ac18721ec9341d3590b9a339bd4fdf4ce39d3db5eaba31dadf71f8cc",
+      "unlockedAt": 1790354137044,
+      "lastUsedAt": 1790354137044,
+      "customerNote": "Master Container Node 01",
+      "plan": "Lifetime",
       "expiresAt": null,
-      "activeKey": null,
-      "createdAt": null
+      "activeKey": "KEY-S01-UNQ-2026",
+      "createdAt": 1790333000000
     },
     {
       "id": 2,

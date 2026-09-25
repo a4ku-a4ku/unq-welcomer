@@ -12,6 +12,7 @@ yarn-error.log*
 .env
 .env.*
 admin-config.json
+sessions.json
 
 # Temporary files
 *.tmp

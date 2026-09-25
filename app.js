@@ -57,6 +57,11 @@ function apiFetch(endpoint, options = {}) {
   }
   options.headers = options.headers || {};
   options.headers['X-Slot-Id'] = String(currentSlotId);
+  options.credentials = 'same-origin';
+  const savedToken = localStorage.getItem('unq_slot_session');
+  if (savedToken) {
+    options.headers['X-Slot-Token'] = savedToken;
+  }
   return fetch(url.toString(), options);
 }
 
@@ -652,10 +657,54 @@ const startBotBtn = $('#bot-start');
 if (startBotBtn) {
   startBotBtn.addEventListener('click', async (e) => {
     e.preventDefault();
+    if (startBotBtn.disabled) return;
     startBotBtn.disabled = true;
-    showToast('Starting bot service...');
+
+    // 1. Gather all current inputs from the UI to ensure everything is saved before launch!
+    const tokenInput = document.querySelector('.token-input');
+    if (tokenInput) {
+      const val = tokenInput.value.trim();
+      config.tokens = val ? [val] : [];
+    }
+
+    // Messages (sync all textarea contents)
+    const msgInputs = document.querySelectorAll('textarea[data-field="messages"]');
+    if (msgInputs && msgInputs.length > 0) {
+      config.messages = Array.from(msgInputs).map(t => t.value.trim()).filter(Boolean);
+    }
+
+    // Routes
+    const routeRows = document.querySelectorAll('.route-row');
+    if (routeRows && routeRows.length > 0) {
+      config.routes = Array.from(routeRows).map((row, idx) => ({
+        id: config.routes[idx]?.id || `r${idx + 1}`,
+        name: row.querySelector('.route-name')?.value?.trim() || `Route #${idx + 1}`,
+        serverId: row.querySelector('.route-server')?.value?.trim() || '',
+        channelId: row.querySelector('.route-channel')?.value?.trim() || ''
+      }));
+    }
+
+    // Delays
+    const minInput = $('#min-delay');
+    const maxInput = $('#max-delay');
+    if (minInput) config.minDelay = Math.max(1, Number(minInput.value) || 2);
+    if (maxInput) config.maxDelay = Math.max(config.minDelay, Number(maxInput.value) || 5);
+
+    showToast('Saving setup & starting bot engine...');
 
     try {
+      // 2. Auto-save config to server
+      const saveRes = await apiFetch('/api/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+      });
+      if (saveRes.ok) {
+        const resData = await saveRes.json();
+        savedConfig = { ...config, ...resData };
+      }
+
+      // 3. Launch the bot
       const res = await apiFetch('/api/bot/start', { method: 'POST' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -666,6 +715,7 @@ if (startBotBtn) {
     } catch {
       showToast('Network error while starting bot');
     } finally {
+      startBotBtn.disabled = false;
       await refreshStatus();
       await refreshLogs();
     }
@@ -759,15 +809,23 @@ function updateTelemetryStats(data, measuredPing) {
   }
 }
 
+let consecutive401s = 0;
+
 async function refreshStatus() {
   const pingStart = performance.now();
   try {
     const r = await apiFetch('/api/bot/status');
     const measuredPing = Math.max(1, Math.round(performance.now() - pingStart));
     if (r.status === 401) {
-      window.location.href = '/slots.html';
+      consecutive401s++;
+      // Only redirect if 401 persists for 3 consecutive polls (12 seconds)
+      // This protects against temporary server reloads or Render wake-ups!
+      if (consecutive401s >= 3) {
+        window.location.href = `/slots.html?locked=1&slot=${currentSlotId}`;
+      }
       return;
     }
+    consecutive401s = 0;
     const data = await r.json().catch(() => ({ running: false }));
     setBotStatus(Boolean(data.running), data);
     updateTelemetryStats(data, measuredPing);
@@ -819,7 +877,7 @@ async function refreshLogs() {
   try {
     const response = await apiFetch('/api/config');
     if (response.status === 401) {
-      window.location.href = '/slots.html';
+      window.location.href = `/slots.html?locked=1&slot=${currentSlotId}`;
       return;
     }
     const loaded = await response.json();
