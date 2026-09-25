@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Configure and run multi-guild Discord welcome bots with randomized messages and tokens.">
+  <title>WELCOME // CONTROL 2.0</title>
+  <link rel="stylesheet" href="style.css?v=20260925h">
+</head>
+<body>
+  <div class="cursor-glow" aria-hidden="true"></div>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="#top" aria-label="Welcome Control home">
+          <img src="/logo.png" alt="A4KU Logo" class="brand-logo-img" onerror="this.style.display='none'">
+          <div>
+            <div class="brand-name">A4KU // WELCOME ENGINE 2.0</div>
+            <div class="brand-subtitle">MULTI-GUILD CLUSTER WORKSPACE</div>
+          </div>
+          <span class="version" id="user-node-badge">NODE 01</span>
+        </a>
+        <div class="top-actions">
+          <a href="/slots.html" id="nav-slots" class="secondary-button small" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;">◫ SLOTS</a>
+          <span id="bot-status-pill" class="status-pill"><span class="status-dot status-off"></span> BOT STOPPED</span>
+          <button id="bot-start" class="primary-button small" type="button">START BOT</button>
+          <button id="bot-stop" class="secondary-button small" type="button" disabled>STOP</button>
+          <button id="logout" class="secondary-button small" type="button">SIGN OUT</button>
+        </div>
+      </div>
+    </header>
+
+    <main id="top" class="main-content control-room">
+      <section class="room-status reveal">
+        <div>
+          <p class="eyebrow">A4KU // WELCOME ENGINE</p>
+          <strong id="config-name-display">Multi-Guild Welcome Workspace</strong>
+        </div>
+        <div class="room-metrics">
+          <span><i class="status-dot" id="service-dot"></i> <span id="service-label">SERVICE READY</span></span>
+          <span id="token-count">0 TOKENS</span>
+          <span id="route-count">0 ROUTES</span>
+          <span id="message-count">0 MSGS</span>
+          <b id="route-badge">ACTIVE</b>
+        </div>
+      </section>
+
+      <section class="control-grid reveal delay-1">
+        <aside class="left-rail">
+
+          <section class="panel setup-card">
+            <div class="panel-heading">
+              <div>
+                <span class="section-kicker">CONFIG NAME</span>
+                <h2>Welcome Workspace</h2>
+              </div>
+              <span class="mono-label">LOCAL</span>
+            </div>
+            <label class="field">
+              <span>WORKSPACE NAME</span>
+              <input id="config-name" type="text" placeholder="My Welcome Setup" maxlength="80">
+            </label>
+            <div class="form-grid compact-grid">
+              <label class="field">
+                <span>MIN DELAY <b id="min-delay-value">2.0s</b></span>
+                <input id="min-delay" name="minDelay" type="range" min="0" max="30" step="0.5" value="2">
+              </label>
+              <label class="field">
+                <span>MAX DELAY <b id="max-delay-value">5.0s</b></span>
+                <input id="max-delay" name="maxDelay" type="range" min="0" max="60" step="0.5" value="5">
+              </label>
+            </div>
+          </section>
+
+          <section class="panel routes-card">
+            <div class="panel-heading">
+              <div>
+                <span class="section-kicker">SERVER ROUTES</span>
+                <h2>Guild Mappings <span id="routes-badge" class="count-chip">0</span></h2>
+              </div>
+              <button id="add-route" class="secondary-button micro" type="button">+ ADD ROUTE</button>
+            </div>
+            <p class="card-copy">Map each Discord server (guild) to a welcome channel. The bot greets members who join any mapped server.</p>
+            <div id="routes-list" class="route-list"></div>
+          </section>
+
+          <section class="panel messages-card">
+            <div class="panel-heading">
+              <div>
+                <span class="section-kicker">WELCOME MESSAGES</span>
+                <h2>Message Pool <span id="messages-badge" class="count-chip">0</span></h2>
+              </div>
+              <button id="add-message" class="secondary-button micro" type="button">+ ADD MSG</button>
+            </div>
+            <p class="card-copy">One message is randomly selected each join. Supports <em>{tag}</em>, <em>{user}</em>, <em>{username}</em>, <em>{server}</em>, <em>{count}</em>.</p>
+            <div id="messages-list" class="message-list"></div>
+          </section>
+
+          <div class="form-actions stacked">
+            <button class="secondary-button" id="reset-config" type="button">RESET CHANGES</button>
+            <button class="primary-button" id="save-config" type="button">SAVE CONFIG <span>→</span></button>
+          </div>
+
+          <section class="panel system-telemetry-card">
+            <div class="panel-heading">
+              <div>
+                <span class="section-kicker">HOST & RUNTIME TELEMETRY</span>
+                <h2>Node Performance</h2>
+              </div>
+              <span class="mono-label" id="sys-enclave-badge">NODE 01</span>
+            </div>
+            <div class="sys-metrics-grid">
+              <div class="sys-metric-item">
+                <span class="sys-metric-label">DASHBOARD UPTIME</span>
+                <div class="sys-metric-value-row">
+                  <span class="sys-metric-icon">🕒</span>
+                  <strong id="sys-uptime-val">00:00:00</strong>
+                </div>
+                <span class="sys-metric-sub" id="sys-uptime-sub">Session active</span>
+              </div>
+              <div class="sys-metric-item">
+                <span class="sys-metric-label">NETWORK PING</span>
+                <div class="sys-metric-value-row">
+                  <span class="stat-pulse-dot" id="sys-ping-dot"></span>
+                  <strong id="sys-ping-val">-- ms</strong>
+                </div>
+                <span class="sys-metric-sub" id="sys-ping-sub">Dashboard Latency</span>
+              </div>
+              <div class="sys-metric-item">
+                <span class="sys-metric-label">RAM USAGE (RSS)</span>
+                <div class="sys-metric-value-row">
+                  <strong id="sys-memory-val">-- MB</strong>
+                </div>
+                <span class="sys-metric-sub" id="sys-heap-val">Heap: -- MB</span>
+              </div>
+              <div class="sys-metric-item">
+                <span class="sys-metric-label">ENGINE RUNTIME</span>
+                <div class="sys-metric-value-row">
+                  <strong id="sys-runtime-val">Node.js</strong>
+                </div>
+                <span class="sys-metric-sub" id="sys-gateway-sub">Gateway: Standby</span>
+              </div>
+            </div>
+            <div class="sys-health-banner">
+              <span class="sys-health-pulse"></span>
+              <span id="sys-health-status">ALL CLUSTER SYSTEMS NOMINAL · 100% OPERATIONAL</span>
+            </div>
+          </section>
+        </aside>
+
+        <section class="right-rail">
+          <section class="panel logs-card">
+            <div class="panel-heading console-heading">
+              <div>
+                <span class="section-kicker">LIVE ENGINE LOGS</span>
+                <h2>Console Stream</h2>
+              </div>
+              <div class="console-heading-actions">
+                <div class="console-telemetry-chips">
+                  <div class="console-stat-chip" id="chip-ping" title="Dashboard Server & Gateway Latency">
+                    <span class="stat-pulse-dot" id="console-ping-dot"></span>
+                    <span class="stat-chip-label">PING</span>
+                    <strong class="stat-chip-val" id="console-ping-val">-- ms</strong>
+                  </div>
+                  <div class="console-stat-chip" id="chip-uptime" title="Dashboard Server Runtime Uptime">
+                    <span class="stat-chip-icon">🕒</span>
+                    <span class="stat-chip-label">UPTIME</span>
+                    <strong class="stat-chip-val" id="console-uptime-val">00:00:00</strong>
+                  </div>
+                  <div class="console-stat-chip" id="chip-gateway" title="Discord Gateway State">
+                    <span class="stat-indicator-mini" id="console-gateway-dot"></span>
+                    <span class="stat-chip-label">GW</span>
+                    <strong class="stat-chip-val" id="console-gateway-val">STANDBY</strong>
+                  </div>
+                </div>
+                <button id="clear-logs" class="secondary-button micro" type="button">CLEAR LOGS</button>
+              </div>
+            </div>
+            <div id="logs-stream" class="logs-stream">
+              <div class="log-empty">No activity yet. Configure and START BOT to begin.</div>
+            </div>
+          </section>
+
+          <section class="panel tokens-card">
+            <div class="panel-heading">
+              <div>
+                <span class="section-kicker">ACCOUNT SECURITY · TOKEN</span>
+                <h2>Bot Token <span id="tokens-badge" class="count-chip">0</span></h2>
+              </div>
+              <button id="toggle-token-mask" class="secondary-button micro" type="button" title="Toggle token visibility">👁 SHOW</button>
+            </div>
+            <p class="card-copy">Securely stored & sanitized. Token credentials are encrypted in transit and masked from screen-capture.</p>
+            <div id="tokens-list" class="token-list"></div>
+          </section>
+
+          <section class="panel profile-telemetry-card">
+            <div class="panel-heading">
+              <div>
+                <span class="section-kicker">DISCORD PROFILE · TELEMETRY</span>
+                <h2>Active Account</h2>
+              </div>
+              <span class="mono-label" id="telemetry-label">STANDBY</span>
+            </div>
+
+            <!-- Discord Profile Live Card -->
+            <div class="discord-profile-card" id="discord-profile-card">
+              <div class="profile-banner" id="profile-banner">
+                <div class="banner-overlay"></div>
+              </div>
+              <div class="profile-content">
+                <div class="profile-avatar-row">
+                  <div class="profile-avatar-wrap">
+                    <img id="profile-avatar-img" class="profile-avatar-img" src="/logo.png" alt="Avatar">
+                    <span class="avatar-status-dot" id="avatar-status-dot" title="Account status"></span>
+                  </div>
+                  <div class="profile-badges-row" id="profile-badges-row">
+                    <span class="badge-nitro" id="badge-nitro" title="Nitro Subscriber">⚡ NITRO</span>
+                    <span class="badge-clan" id="badge-clan" title="Guild Clan">[UNQ]</span>
+                    <span class="badge-verified" id="badge-verified" title="Account Verified">✓ VERIFIED</span>
+                  </div>
+                </div>
+
+                <div class="profile-identity">
+                  <div class="profile-name-row">
+                    <strong class="profile-global-name" id="profile-global-name">Welcome Worker</strong>
+                    <span class="profile-handle" id="profile-handle">@not_connected</span>
+                  </div>
+                  <div class="profile-meta-row">
+                    <button type="button" class="id-copy-chip" id="btn-copy-id" title="Click to copy Discord Snowflake ID">
+                      <span class="chip-label">ID:</span>
+                      <span class="chip-val" id="profile-snowflake">------------------</span>
+                      <span class="chip-action" id="copy-status-text">COPY</span>
+                    </button>
+                    <span class="created-chip" id="profile-created-chip" title="Account creation timestamp">
+                      <span class="chip-icon">🕒</span> <span id="profile-created-text">Joined: --</span>
+                    </span>
+                  </div>
+                </div>
+
+                <div class="token-health-bar" id="token-health-bar">
+                  <span class="health-indicator-dot"></span>
+                  <span class="health-message" id="token-health-message">PASTE A TOKEN TO CONNECT PROFILE</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="telemetry-stats">
+              <div><span>TOKENS LOADED</span><strong id="telemetry-tokens">0</strong></div>
+              <div><span>DELAY RANGE</span><strong id="telemetry-delay">2–5s</strong></div>
+              <div><span>ROUTE COUNT</span><strong id="telemetry-routes">0</strong></div>
+              <div><span>MSG POOL SIZE</span><strong id="telemetry-messages">0</strong></div>
+            </div>
+            <div id="clients-list" class="clients-list"></div>
+          </section>
+        </section>
+      </section>
+    </main>
+    <footer class="footer">
+      <span>WELCOME // ENGINE 2.0</span>
+          <span>MULTI-TOKEN · MULTI-GUILD · RANDOMIZED MESSAGES · LOCAL STORAGE</span>
+    </footer>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js?v=20260925h"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "welcomer-dashboard",
+  "version": "2.0.0",
+  "private": true,
+  "description": "A4KU // 12 Welcomer Multi-Container Matrix & Leasing Platform",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "discord.js-selfbot-v13": "^3.7.1"
+  }
+}

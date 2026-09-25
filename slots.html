@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>A4KU // 12 WELCOME SLOTS</title>
+  <link rel="stylesheet" href="slots.css?v=20260925e">
+  <link rel="icon" type="image/png" href="/logo.png">
+</head>
+<body>
+  <div class="cursor-glow" aria-hidden="true"></div>
+
+  <div class="app-wrapper">
+    <!-- Topbar Header -->
+    <header class="a4ku-header">
+      <div class="header-container">
+        <a class="brand-badge" href="/slots.html">
+          <img src="/logo.png" alt="A4KU Logo" class="brand-logo-img" onerror="this.style.display='none'">
+          <div>
+            <div class="brand-title">A4KU // WELCOME MATRIX</div>
+            <div class="brand-subtitle">MULTI-GUILD WELCOME CLUSTER</div>
+          </div>
+          <span class="brand-tag">12 WELCOME SLOTS</span>
+        </a>
+
+        <div class="top-actions">
+          <div class="server-status-pill">
+            <span class="pulse-dot"></span>
+            <span id="system-state">SYSTEM ONLINE</span>
+          </div>
+          <a href="https://discord.gg/unq" target="_blank" rel="noopener noreferrer" class="header-btn discord-header-btn">💬 DISCORD.GG/UNQ</a>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="main-content">
+      <!-- Hero Intro Banner -->
+      <section class="matrix-banner">
+        <div class="banner-left">
+          <span class="eyebrow">AUTOMATED DISCORD GREETINGS</span>
+          <h1 class="banner-title">12 WELCOME SLOTS</h1>
+          <p class="banner-desc">Private Discord welcomer containers. Select your assigned slot or unlock with an access key to manage your automated greetings.</p>
+        </div>
+
+        <div class="banner-chips">
+          <div class="feature-chip">
+            <span class="chip-dot"></span>
+            <span>12 ISOLATED WELCOMERS</span>
+          </div>
+          <div class="feature-chip">
+            <span class="chip-dot"></span>
+            <span>MULTI-TOKEN ROTATION</span>
+          </div>
+          <div class="feature-chip">
+            <span class="chip-dot"></span>
+            <span>24/7 AUTO GREETING</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Active Session Notice (dynamically populated) -->
+      <div id="active-session-banner" class="active-session-banner" style="display:none;"></div>
+
+      <!-- Slots Grid -->
+      <section id="slot-grid" class="slot-grid" aria-live="polite">
+        <!-- Rendered by slots.js -->
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="a4ku-footer">
+      <div>A4KU // WELCOME ENGINE 2.0 · MULTI-CONTAINER CLUSTER · PRIVATE LOCAL STORAGE</div>
+    </footer>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="slots.js?v=20260925d"></script>
+</body>
+</html>

@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>A4KU // ADMIN CONTROL STATION</title>
+  <link rel="stylesheet" href="admin.css">
+  <link rel="icon" type="image/png" href="/logo.png">
+</head>
+<body>
+  <div class="cursor-glow" aria-hidden="true"></div>
+
+  <div class="app-wrapper">
+    <!-- Header -->
+    <header class="a4ku-header">
+      <div class="header-container">
+        <a class="brand-badge" href="/admin.html">
+          <img src="/logo.png" alt="A4KU Logo" class="brand-logo-img" onerror="this.style.display='none'">
+          <div>
+            <div class="brand-title">A4KU // ADMIN CONTROL</div>
+            <div class="brand-subtitle">CONTAINER CREDENTIAL MANAGER</div>
+          </div>
+          <span class="brand-tag">SECURITY ROOT</span>
+        </a>
+
+        <div class="top-actions">
+          <div class="server-status-pill">
+            <span class="pulse-dot"></span>
+            <span id="admin-status-text">SECURE ENCLAVE</span>
+          </div>
+          <a href="/slots.html" class="header-btn">◫ SLOTS GRID</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="main-content">
+      <!-- Login View (Hero Box matching Quest 2.0) -->
+      <section id="login-view" class="center-card-view">
+        <div class="hero-box">
+          <div class="hero-logo-wrapper">
+            <img src="/logo.png" alt="A4KU Emblem" class="hero-logo-img" onerror="this.style.display='none'">
+          </div>
+          
+          <span class="eyebrow">AUTHENTICATION REQUIRED</span>
+          <h1 class="hero-title">ADMIN GATEWAY</h1>
+          <p class="hero-subtitle">
+            Enter the master administrator secret key to provision, revoke, and manage the 12 container slot nodes.
+          </p>
+
+          <form id="admin-login" class="input-container">
+            <div class="input-wrapper">
+              <input 
+                id="admin-password" 
+                type="password" 
+                class="token-input" 
+                placeholder="Enter master admin key..." 
+                autocomplete="current-password" 
+                minlength="1" 
+                maxlength="128" 
+                required
+              >
+              <button type="button" id="toggle-pw-btn" class="toggle-visibility-btn" title="Toggle visibility">
+                👁
+              </button>
+            </div>
+
+            <button type="submit" class="primary-btn">
+              <span>AUTHENTICATE ACCESS</span>
+              <span>→</span>
+            </button>
+
+            <div id="login-error" class="error-banner"></div>
+            
+            <div class="input-helper-text">
+              <span>🔒 Zero plaintext secrets. Single-session encrypted token authentication.</span>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- Panel View (Slot Management Matrix) -->
+      <section id="panel-view" class="admin-panel-view" hidden>
+        <!-- Top Stats / Controls Bar -->
+        <div class="panel-topbar">
+          <div>
+            <span class="eyebrow">CLUSTER ADMINISTRATION</span>
+            <h1 class="section-heading">12 CONTAINER NODES</h1>
+            <p class="panel-desc">Generate single-use encrypted passwords or instantly revoke runtime access for any container.</p>
+          </div>
+
+          <div class="panel-actions">
+            <button id="open-change-pw-btn" class="secondary-btn" type="button">🔑 CHANGE KEY</button>
+            <button id="refresh-slots" class="secondary-btn" type="button">↻ REFRESH</button>
+            <button id="logout" class="primary-btn small" type="button">SIGN OUT</button>
+          </div>
+        </div>
+
+        <!-- Node Management Grid -->
+        <div id="admin-grid" class="admin-grid"></div>
+      </section>
+
+      <!-- Change Admin Password Modal -->
+      <div id="change-pw-modal" class="modal-overlay" hidden>
+        <div class="modal-card">
+          <div class="modal-head">
+            <h3>CHANGE MASTER ADMIN KEY</h3>
+            <button id="close-change-pw-btn" type="button" class="modal-close-btn">&times;</button>
+          </div>
+          <p class="modal-desc">Update the secret master key required to access the Admin Control Station. Minimum 8 characters.</p>
+          <form id="change-pw-form" class="modal-form" onsubmit="return false;">
+            <label class="modal-field">
+              <span>CURRENT MASTER KEY</span>
+              <input type="password" id="current-pw" placeholder="Enter current master key..." required autocomplete="current-password">
+            </label>
+            <label class="modal-field">
+              <span>NEW MASTER KEY</span>
+              <input type="password" id="new-pw" placeholder="Min 8 characters..." minlength="8" required autocomplete="new-password">
+            </label>
+            <label class="modal-field">
+              <span>CONFIRM NEW KEY</span>
+              <input type="password" id="confirm-pw" placeholder="Re-enter new key..." minlength="8" required autocomplete="new-password">
+            </label>
+            <div id="change-pw-error" class="modal-error" style="display:none;"></div>
+            <div class="modal-buttons">
+              <button type="button" id="cancel-change-pw-btn" class="secondary-btn">CANCEL</button>
+              <button type="submit" id="save-pw-btn" class="primary-btn">UPDATE MASTER KEY</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="a4ku-footer">
+      <div>A4KU // HOST ENGINE 2.0 · ADMIN CONSOLE · STRICT ACCESS POLICIES ENFORCED</div>
+    </footer>
+  </div>
+
+  <div id="admin-toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="admin.js"></script>
+</body>
+</html>

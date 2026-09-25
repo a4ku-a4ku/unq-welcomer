@@ -1,0 +1,36 @@
+{
+  "AAKU": {
+    "name": "My Welcome Setup",
+    "minDelay": 2,
+    "maxDelay": 5,
+    "routes": [
+      {
+        "id": "r1",
+        "name": "Main Server",
+        "serverId": "1480829982748967044",
+        "channelId": "1480852059786973204"
+      }
+    ],
+    "messages": [
+      "Welcome {tag} to the server!"
+    ],
+    "tokens": []
+  },
+  "slot_01": {
+    "name": "My Welcome Setup",
+    "minDelay": 2,
+    "maxDelay": 5,
+    "routes": [
+      {
+        "id": "r1",
+        "name": "Main Server",
+        "serverId": "1480829982748967044",
+        "channelId": "1480852059786973204"
+      }
+    ],
+    "messages": [
+      "Welcome {tag} to the server!"
+    ],
+    "tokens": []
+  }
+}
