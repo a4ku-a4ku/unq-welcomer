@@ -3,7 +3,15 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 let DiscordClient = null;
-try { DiscordClient = require('discord.js-selfbot-v13').Client; } catch (e) { DiscordClient = null; }
+let DiscordOptions = null;
+try {
+  const Discord = require('discord.js-selfbot-v13');
+  DiscordClient = Discord.Client;
+  DiscordOptions = Discord.Options;
+} catch (e) {
+  DiscordClient = null;
+  DiscordOptions = null;
+}
 
 const root = __dirname;
 const port = Number(process.env.PORT) || 3000;
@@ -143,17 +151,20 @@ function verifySecret(secret, stored) {
 }
 
 function getAdminPasswordHash() {
+  const cfg = readJson(adminConfigFile, null);
+  if (cfg && cfg.passwordHash && cfg.updatedAt > 0) {
+    return cfg.passwordHash;
+  }
   if (process.env.ADMIN_PASSWORD && process.env.ADMIN_PASSWORD.trim().length > 0) {
     return hashSecret(process.env.ADMIN_PASSWORD.trim(), 'adm-salt-2026');
   }
-  const cfg = readJson(adminConfigFile, null);
   if (cfg && cfg.passwordHash) {
     return cfg.passwordHash;
   }
   const initial = hashSecret('admin123');
   writeJson(adminConfigFile, {
     passwordHash: initial,
-    updatedAt: Date.now(),
+    updatedAt: 0,
     note: 'Initial master key is admin123. Please change it via the Admin Control Station.'
   });
   return initial;
@@ -185,7 +196,33 @@ function isRequestSecure(request) {
   if (proto && proto.toLowerCase() === 'https') return true;
   return Boolean(request.connection && request.connection.encrypted);
 }
-function body(request) { return new Promise((resolve, reject) => { let data = ''; request.on('data', (chunk) => { data += chunk; if (data.length > 100000) reject(new Error('Body too large')); }); request.on('end', () => { try { resolve(JSON.parse(data || '{}')); } catch { reject(new Error('Invalid JSON')); } }); }); }
+function body(request) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    const timer = setTimeout(() => {
+      reject(new Error('Request timeout'));
+    }, 10000);
+    request.on('data', (chunk) => {
+      data += chunk;
+      if (data.length > 100000) {
+        clearTimeout(timer);
+        reject(new Error('Body too large'));
+      }
+    });
+    request.on('end', () => {
+      clearTimeout(timer);
+      try {
+        resolve(JSON.parse(data || '{}'));
+      } catch {
+        reject(new Error('Invalid JSON'));
+      }
+    });
+    request.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
 function send(response, status, data) {
   response.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
@@ -431,8 +468,87 @@ function getBotStatus(username) {
 
 const botTransitioning = new Map();
 const lastStoppedAt = new Map();
+const welcomeQueues = new Map();
+const queueProcessing = new Map();
+
+function enqueueWelcome(username, task) {
+  if (!welcomeQueues.has(username)) welcomeQueues.set(username, []);
+  const q = welcomeQueues.get(username);
+  if (q.length >= 60) {
+    pushLog(username, 'warn', `⚠️ Join queue busy (>60 joins). Throttled ${task.member && task.member.user ? task.member.user.username : 'member'} to prevent Discord API bans.`);
+    return;
+  }
+  q.push(task);
+  processWelcomeQueue(username);
+}
+
+async function processWelcomeQueue(username) {
+  if (queueProcessing.get(username)) return;
+  const q = welcomeQueues.get(username);
+  if (!q || q.length === 0) return;
+
+  queueProcessing.set(username, true);
+  try {
+    while (q && q.length > 0) {
+      const instances = botInstances.get(username);
+      if (!instances || instances.length === 0) {
+        q.length = 0;
+        break;
+      }
+
+      const task = q.shift();
+      const { member, client, route, messages, minDelay, maxDelay } = task;
+
+      try {
+        const channel = await client.channels.fetch(String(route.channelId)).catch(() => null);
+        if (!channel) {
+          pushLog(username, 'error', `Channel [${route.channelId}] not found or inaccessible in ${member.guild ? member.guild.name : 'guild'}`);
+          continue;
+        }
+
+        const delaySec = Math.max(2.0, Math.random() * (maxDelay - minDelay) + minDelay);
+        const delayMs = Math.floor(delaySec * 1000);
+
+        await new Promise(r => setTimeout(r, delayMs));
+
+        if (!botInstances.has(username)) break;
+
+        const randomMsg = messages[Math.floor(Math.random() * messages.length)];
+        const memberCount = member.guild ? (member.guild.memberCount || '?') : '?';
+        const guildName = member.guild ? member.guild.name : 'Server';
+        const usernameTag = member.user ? member.user.username : 'user';
+
+        let finalMsg = randomMsg
+          .replace(/\{tag\}/g, `<@${member.id}>`)
+          .replace(/\{user\}/g, `<@${member.id}>`)
+          .replace(/\{mention\}/g, `<@${member.id}>`)
+          .replace(/\{username\}/g, usernameTag)
+          .replace(/\{server\}/g, guildName)
+          .replace(/\{guild\}/g, guildName)
+          .replace(/\{id\}/g, String(member.id))
+          .replace(/\{count\}/g, String(memberCount));
+
+        if (!finalMsg.includes(`<@${member.id}>`)) {
+          finalMsg = `${finalMsg} <@${member.id}>`;
+        }
+
+        await channel.send(finalMsg);
+        pushLog(username, 'success', `🚀 Welcomed ${usernameTag} in #${channel.name || 'channel'} (${guildName}) [Paced: ${delaySec.toFixed(1)}s]`);
+      } catch (err) {
+        pushLog(username, 'error', `❌ Send Fail for ${member.user ? member.user.username : 'member'}: ${err.message}`);
+      }
+    }
+  } finally {
+    queueProcessing.delete(username);
+  }
+}
 
 function stopBot(username) {
+  const q = welcomeQueues.get(username);
+  if (q) q.length = 0;
+  welcomeQueues.delete(username);
+  queueProcessing.delete(username);
+
   const pending = botTimers.get(username);
   if (pending) {
     pending.forEach(t => clearTimeout(t));
@@ -501,7 +617,31 @@ async function startBot(username) {
     tokens.forEach((rawToken, idx) => {
       const token = rawToken.trim();
       try {
-        const client = new DiscordClient({ checkUpdate: false });
+        const clientOptions = {
+          checkUpdate: false,
+          sweepers: {
+            messages: {
+              interval: 180,
+              lifetime: 60
+            }
+          }
+        };
+        if (DiscordOptions && typeof DiscordOptions.cacheWithLimits === 'function') {
+          clientOptions.makeCache = DiscordOptions.cacheWithLimits({
+            MessageManager: 10,
+            UserManager: 50,
+            GuildMemberManager: 50,
+            PresenceManager: 0,
+            ReactionManager: 0,
+            ReactionUserManager: 0,
+            StageInstanceManager: 0,
+            ThreadManager: 0,
+            ThreadMemberManager: 0,
+            VoiceStateManager: 0
+          });
+        }
+
+        const client = new DiscordClient(clientOptions);
         const inst = { client, tag: null, online: false, tokenIdx: idx, startedAt: Date.now() };
         instances.push(inst);
 
@@ -546,42 +686,8 @@ async function startBot(username) {
           const route = routes.find(r => String(r.serverId) === String(serverID));
           if (!route) return;
 
-          pushLog(username, 'info', `📢 Join detected in [${member.guild.name}]: ${member.user.tag || member.user.username}`);
-
-          const channel = await client.channels.fetch(String(route.channelId)).catch(() => null);
-          if (!channel) { pushLog(username, 'error', `Channel [${route.channelId}] not found in ${member.guild.name}`); return; }
-
-          const delaySec = Math.random() * (maxDelay - minDelay) + minDelay;
-          const delayMs = Math.floor(delaySec * 1000);
-
-          if (!botTimers.has(username)) botTimers.set(username, new Set());
-          const userTimers = botTimers.get(username);
-
-          const timer = setTimeout(async () => {
-            userTimers.delete(timer);
-            const randomMsg = messages[Math.floor(Math.random() * messages.length)];
-            const memberCount = member.guild.memberCount || '?';
-            let finalMsg = randomMsg
-              .replace(/\{tag\}/g, `<@${member.id}>`)
-              .replace(/\{user\}/g, `<@${member.id}>`)
-              .replace(/\{mention\}/g, `<@${member.id}>`)
-              .replace(/\{username\}/g, member.user.username)
-              .replace(/\{server\}/g, member.guild.name)
-              .replace(/\{guild\}/g, member.guild.name)
-              .replace(/\{count\}/g, String(memberCount));
-
-            if (!finalMsg.includes(`<@${member.id}>`)) {
-              finalMsg = `${finalMsg} <@${member.id}>`;
-            }
-
-            try {
-              await channel.send(finalMsg);
-              pushLog(username, 'success', `🚀 Welcomed ${member.user.username} in #${channel.name || 'channel'} (${member.guild.name}) [Delay: ${delaySec.toFixed(1)}s]`);
-            } catch (err) {
-              pushLog(username, 'error', `❌ Send Fail in ${member.guild.name}: ${err.message}`);
-            }
-          }, delayMs);
-          userTimers.add(timer);
+          pushLog(username, 'info', `📢 Join detected in [${member.guild.name}]: ${member.user ? (member.user.tag || member.user.username) : 'New User'}`);
+          enqueueWelcome(username, { member, client, route, messages, minDelay, maxDelay });
         });
 
         const safePrefix = token.length > 8 ? `${token.slice(0, 4)}...****` : '****';
@@ -603,6 +709,16 @@ async function startBot(username) {
 
     botInstances.set(username, instances);
     pushLog(username, 'info', `Connecting ${instances.length} bot account(s) to Discord Gateway...`);
+
+    // Persist botEnabled state so Render uptime restarts auto-restore
+    try {
+      const currentConfigs = readJson(configFile, {});
+      if (currentConfigs[username]) {
+        currentConfigs[username].botEnabled = true;
+        writeJson(configFile, currentConfigs);
+      }
+    } catch {}
+
     return { ok: true };
   } finally {
     botTransitioning.delete(username);
@@ -923,6 +1039,13 @@ function api(request, response, pathname) {
 
   if (pathname === '/api/bot/stop' && request.method === 'POST') {
     const current = requireSession(request, response); if (!current) return;
+    try {
+      const currentConfigs = readJson(configFile, {});
+      if (currentConfigs[current.username]) {
+        currentConfigs[current.username].botEnabled = false;
+        writeJson(configFile, currentConfigs);
+      }
+    } catch {}
     stopBot(current.username);
     return send(response, 200, { ok: true, status: getBotStatus(current.username) });
   }
@@ -960,7 +1083,7 @@ function api(request, response, pathname) {
   return false;
 }
 
-http.createServer((request, response) => {
+const server = http.createServer((request, response) => {
   const SEC_HEADERS = {
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
@@ -1041,7 +1164,41 @@ http.createServer((request, response) => {
     ...SEC_HEADERS
   });
   fs.createReadStream(filePath).pipe(response);
-}).listen(port, '0.0.0.0', () => {
+});
+
+async function autoStartConfiguredBots() {
+  console.log('[AUTO-START] Checking for active configured bot slots to restore...');
+  const slots = slotState();
+  const configs = readJson(configFile, {});
+  const now = Date.now();
+
+  for (const slot of slots) {
+    const isExpired = Boolean(slot.expiresAt && now > slot.expiresAt);
+    if (!slot.passwordHash || isExpired) continue;
+
+    const username = `slot_${String(slot.id).padStart(2, '0')}`;
+    const cfg = configs[username] || (username === 'slot_01' ? configs['AAKU'] : null);
+    if (!cfg) continue;
+
+    const hasTokens = Array.isArray(cfg.tokens) && cfg.tokens.some(t => typeof t === 'string' && t.trim().length > 20);
+    const hasRoutes = Array.isArray(cfg.routes) && cfg.routes.some(r => r && r.serverId && r.channelId);
+    const hasMessages = Array.isArray(cfg.messages) && cfg.messages.some(m => typeof m === 'string' && m.trim().length > 0);
+
+    if (cfg.botEnabled || (username === 'slot_01' && hasTokens && hasRoutes && hasMessages)) {
+      console.log(`[AUTO-START] Restoring bot for ${username} (Slot #${slot.id})...`);
+      try {
+        await startBot(username);
+      } catch (err) {
+        console.error(`[AUTO-START] Failed to start ${username}:`, err.message);
+      }
+      await new Promise(r => setTimeout(r, 3500));
+    }
+  }
+}
+
+server.listen(port, '0.0.0.0', () => {
   console.log(`Slot host running on http://localhost:${port}`);
   console.log('[ADMIN PANEL] Password configured.');
+  setTimeout(autoStartConfiguredBots, 3500);
 });
+
